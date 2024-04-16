@@ -7,7 +7,7 @@
 
 #include <Eigen/Sparse>
 
-typedef Eigen::SparseMatrix<double, Eigen::RowMajor> SpMat; // declares a row-major sparse matrix type of double
+typedef Eigen::SparseMatrix<double, Eigen::ColMajor> SpMat; // declares a row-major sparse matrix type of double
 typedef Eigen::Triplet<double> T;
 
 class MapMatrix
@@ -199,6 +199,7 @@ void CG(const MapMatrix &A,
     {
       std::cout << "iteration: " << num_it << "\t";
       std::cout << "residual:  " << rres << "\n";
+      std::cout << B << "\n";
     }
   }
 }
@@ -230,16 +231,15 @@ void CG_SPM(const Eigen::SparseMatrix<double> &A,
   MPI_Comm_rank(MPI_COMM_WORLD, &rank); // Get the rank of the process
 
   Eigen::SparseMatrix<double> n_n_preconditioner = A.middleCols(row_offset, A.rows());
-
   Eigen::SimplicialCholesky<Eigen::SparseMatrix<double>> P(n_n_preconditioner);
 
-  std::vector<double> r = b, z = prec(P, r), p = z, Ap = sm_vec_mult(n_n_preconditioner, p);
+  std::vector<double> r = b, z = prec(P, r), p = z, Ap = sm_vec_mult(A, p);
 
   double np2 = (p, Ap), alpha = 0., beta = 0.;
   double nr = sqrt((z, r));
   double epsilon = tol * nr;
 
-  std::vector<double> res = sm_vec_mult(n_n_preconditioner, x);
+  std::vector<double> res = sm_vec_mult(A, x);
 
   res += (-1) * b;
 
@@ -261,10 +261,11 @@ void CG_SPM(const Eigen::SparseMatrix<double> &A,
     rres = sqrt((r, r));
 
     num_it++;
-    if (rank == 0 && !(num_it % 1))
+    if (rank == 1 && !(num_it % 1))
     {
       std::cout << "iteration: " << num_it << "\t";
       std::cout << "residual:  " << rres << "\n";
+      std::cout << n_n_preconditioner << "\n";
     }
   }
 }
@@ -317,15 +318,11 @@ int main(int argc, char *argv[])
 
   assert(N % size == 0);
 
-  // row-distributed matrix
-  double map_time = MPI_Wtime();
-
   // NEW MATRIX 1D decomposition
   // Making sparse matrix using eigen instead of map.
   // Compute the local submatrix size and indices
   const int nx = N / size;
   const int row_offset = nx * rank;
-
   // std::cout << "Defined the local sparse matrix" << std::endl;
   // std::cout << "nx: " << nx << std::endl;
   // std::cout << "row offset: " << row_offset << std::endl;
@@ -379,12 +376,91 @@ int main(int argc, char *argv[])
   // Construct the local submatrix
   A_local.setFromTriplets(triplets.begin(), triplets.end());
 
-  // std::cout << "Constructed the following local sparse matrix on processor: " << rank << "\n"
-  //           << A_local << std::endl;
+  std::cout << "Constructed the following local sparse matrix on processor: " << rank << "\n"
+            << A_local << std::endl;
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  // Get global matrix
+  const int num_rows = N;
+  const int num_cols = N;
+  const int num_rows_per_proc = nx;
+
+  // Compute send and receive counts and displacements
+  std::vector<int> recv_counts_global(size, nx * N);
+  std::vector<int> displacements(size);
+  for (int i = 0; i < size; ++i)
+  {
+    // recv_counts_global[i] = i == size - 1 ? num_rows - i * num_rows_per_proc : num_rows_per_proc;
+    displacements[i] = i * num_rows_per_proc;
+  }
+
+  // Allocate receive buffer on rank 0
+  std::vector<Eigen::Triplet<double>> all_triplets(num_rows * num_cols);
+  Eigen::SparseMatrix<double> global_matrix(num_rows, num_cols);
+
+  if (rank == 0)
+  {
+    std::cout << "Trying to build global matrix" << std::endl;
+  }
+
+  // Gather local matrices to rank 0
+  MPI_Gatherv(A_local.valuePtr(), A_local.nonZeros(), MPI_DOUBLE,
+              all_triplets.data(), recv_counts_global.data(), displacements.data(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+  // Construct global matrix on rank 0
+  if (rank == 0)
+  {
+    std::cout << "Made it p far" << std::endl;
+    for (int i = 0; i < all_triplets.size(); i++)
+    {
+      std::cout << all_triplets[i].col() << all_triplets[i].row() << all_triplets[i].value() << std::endl;
+    }
+    global_matrix.setFromTriplets(all_triplets.begin(), all_triplets.end());
+    std::cout << "Global matrix:\n"
+              << global_matrix << std::endl;
+  }
 
   // ORIGINAL IMPLEMENTATION
   // local rows of the 1D Laplacian matrix; local column indices start at -1 for rank > 0
   int n = N / size; // number of local rows
+
+  // if (rank == 1)
+  // {
+  //   std::cout << "number of local rows: " << n << std::endl;
+  //   std::cout << "number of procs: " << size << std::endl;
+  //   std::cout << "row offset: " << row_offset << std::endl;
+  // }
+
+  // row-distributed matrix
+  double map_time = MPI_Wtime();
+
+  MapMatrix A(n, N);
+
+  int offset = n * rank;
+
+  for (int i = 0; i < n; i++)
+  {
+    A.Assign(i, i) = 2.0;
+    if (offset + i - 1 >= 0)
+      A.Assign(i, i - 1) = -1;
+    if (offset + i + 1 < N)
+      A.Assign(i, i + 1) = -1;
+    if (offset + i + N < N)
+      A.Assign(i, i + N) = -1;
+    if (offset + i - N >= 0)
+      A.Assign(i, i - N) = -1;
+  }
+
+  // prints map
+  // for (const auto &elem : A.data)
+  // {
+  //   std::cout << elem.first.first << " " << elem.first.second << " " << elem.second << "\n";
+  // }
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  if (rank == 0)
+    std::cout << "wall time for Map: " << MPI_Wtime() - map_time << std::endl;
 
   // initial guess
   std::vector<double> x(n, 0);
@@ -393,39 +469,70 @@ int main(int argc, char *argv[])
   std::vector<double> b(n, 1);
 
   MPI_Barrier(MPI_COMM_WORLD);
-  if (rank == 0)
-    std::cout << "Wall time for 1D: " << MPI_Wtime() - map_time << std::endl;
   double time = MPI_Wtime();
 
-  CG_SPM(A_local, b, x, row_offset);
+  // CG_SPM(A_local, b, x, row_offset);
+
+  CG(A, b, x);
 
   MPI_Barrier(MPI_COMM_WORLD);
+
   if (rank == 0)
+  {
+    std::cout << "Rank: " << rank << std::endl;
+    std::cout << "Vector x size: " << x.size() << std::endl;
+    std::cout << "Values:" << std::endl;
+    for (int i = 0; i < x.size(); i++)
+    {
+      std::cout << x[i] << std::endl;
+    }
+  }
+
+  if (rank == 1)
+  {
+    std::cout << "Rank: " << rank << std::endl;
+    std::cout << "Vector x size: " << x.size() << std::endl;
+    std::cout << "Values:" << std::endl;
+    for (int i = 0; i < x.size(); i++)
+    {
+      std::cout << x[i] << std::endl;
+    }
+  }
+
+  if (rank == 0)
+  {
     std::cout << "wall time for CG: " << MPI_Wtime() - time << std::endl;
+    std::cout << "Vector b size: " << b.size() << " vector x size: " << x.size() << std::endl;
+  }
 
   std::vector<int> displs(size);
 
   for (int i = 0; i < size; i++)
   {
     displs[i] = i * n;
+    // if (i != 0)
+    // {
+    //   displs[i] += 1;
+    // }
   }
   std::vector<int> recv_counts(size, n);
-  std::vector<double> total_r(N);
-  std::vector<double> total_b(N);
+  std::vector<double> total_x(N);
 
-  // Gathering all b from processors.
-  MPI_Gatherv(b.data(), n, MPI_DOUBLE, total_b.data(), recv_counts.data(), displs.data(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+  MPI_Gatherv(x.data(), n, MPI_DOUBLE, total_x.data(), recv_counts.data(), displs.data(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-  Eigen::SparseMatrix<double> A_block = A_local.middleCols(row_offset, A_local.rows());
+  // if (rank == 0)
+  // {
+  //   std::cout << "Vector total_x size: " << total_x.size() << std::endl;
+  //   std::cout << "Values:" << std::endl;
+  //   for (int i = 0; i < total_x.size(); i++)
+  //   {
+  //     std::cout << total_x[i] << std::endl;
+  //   }
+  // }
 
-  // Computing local r for each processor.
-  std::vector<double> r = sm_vec_mult(A_block, x) + (-1) * b;
+  std::vector<double> r = A * x + (-1) * b;
 
-  // Gathering all r from each processor.
-  MPI_Gatherv(r.data(), n, MPI_DOUBLE, total_r.data(), recv_counts.data(), displs.data(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
-  // Computing total error from all processors.
-  double err = Norm(total_r) / Norm(total_b);
+  double err = Norm(r) / Norm(b);
   if (rank == 0)
     std::cout << "|Ax-b|/|b| = " << err << std::endl;
 
