@@ -27,14 +27,14 @@ This project aims to implement a distributed Preconditioned Conjugate Gradient (
     This will create an executable named `pcg` in the build directory.
 
 ## The problem
-The goal is to solve $Ax = b$ where $A = L + I$ is an $N \times N$ s.p.d. matrix with $L$ being the Laplacian of the 1D Poisson's equation and $I$ is the identity matrix. The right hand side $b$ is all 1s and the preconditioned conjugate gradient starts with an initial guess $x$ of all 0s. You can only modify the `distributed_pcg.cpp` file.
+The goal is to solve $Ax = b$ where $A = L$ is an $N \times N$ s.p.d. matrix with $L$ representing the discretized 1D Poisson's equation. The right hand side $b$ is all 1s and the preconditioned conjugate gradient starts with an initial guess $x$ of all 0s. You can only modify the `distributed_pcg.cpp` file.
 
 ## Running the Code
 
 ```sh
 salloc -N 1 -A mp309 -t 10:00 --qos=interactive -C cpu srun -N 1 --ntasks-per-node <number of tasks> ./pcg -N <size of the matrix>
 ```
-We will use only one node in this homework. Please change the number of tasks and the size of the matrix appropriately for your scaling experiments. For simplicity, we assume that the size of the matrix is a multiple of the number of tasks used. Note that the starter code only works for one task and it is not efficient. Also, if using one rank, the preconditioner is just the inverse of $A$, meaning that you will solve the problem in one iteration step.
+We will use only one node in this homework. Please change the number of tasks and the size of the matrix appropriately for your scaling experiments. For simplicity, we assume that the size of the matrix is a multiple of the number of tasks used. Note that the starter code only works for one task and it is not efficient.
 
 ## Submitting the homework
 Ensure that your write-up is located in your source directory, next to distributed_pcg.cpp. It should be named cs267XY_hw4.pdf with XY being your group ID.

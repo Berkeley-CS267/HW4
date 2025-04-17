@@ -18,7 +18,7 @@ class Matrix{
 
     Matrix(const int& nr = 0, const int& nc = 0): nbrow(nr), nbcol(nc) {
       for (int i = 0; i < nc; ++i) {
-        data[std::make_pair(i, i)] = 3.0;
+        data[std::make_pair(i, i)] = 2.0;
         if (i - 1 >= 0) data[std::make_pair(i, i - 1)] = -1.0;
         if (i + 1 < nc) data[std::make_pair(i, i + 1)] = -1.0;
       }
@@ -92,8 +92,8 @@ Matrix A;
 /* N is the size of the matrix, and n is the number of rows assigned per rank.
  * It is your responsibility to generate the input matrix, assuming the ranks are 
  * partitioned rowwise.
- * The input matrix is L + I, where L is the Laplacian of a 1D Possion's equation,
- * and I is the identity matrix.
+ * The input matrix is L, where L represents a discretized 1D Possion's equation.
+ * That is to say L has 2s on its diagonal and -1s on it super/sub-diagonals.
  * See the constructor of the Matrix structure as an example.
  * The constructor of CG_Solver will not be included in the timing result.
  * Note that the starter code only works for 1 rank and it is not efficient.
@@ -110,7 +110,7 @@ void CG_Solver::solve(const std::vector<double>& b, std::vector<double>& x, doub
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank); // Get the rank of the process
 
-  int n = A.NbCol();
+  int n = A.NbRow();
 
   // get the local diagonal block of A
   std::vector<Eigen::Triplet<double>> coefficients;

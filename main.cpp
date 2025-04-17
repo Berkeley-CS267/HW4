@@ -80,7 +80,7 @@ int main(int argc, char* argv[]) {
   if (rank == 0) {
     double r_square = 0;
     for (int i = 0; i < N; ++i) {
-      double r = global_x[i] * 3;
+      double r = global_x[i] * 2;
       if (i > 0)  r -= global_x[i - 1];
       if (i + 1 < N)  r -= global_x[i + 1];
       r_square += (r - 1) * (r - 1);
